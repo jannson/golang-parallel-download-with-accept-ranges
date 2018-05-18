@@ -14,8 +14,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/cheggaaa/pb"
 )
 
 type Worker struct {
@@ -24,12 +22,6 @@ type Worker struct {
 	Count     int64
 	SyncWG    sync.WaitGroup
 	TotalSize int64
-	Progress
-}
-
-type Progress struct {
-	Pool *pb.Pool
-	Bars []*pb.ProgressBar
 }
 
 func main() {
@@ -70,15 +62,6 @@ func main() {
 	var partial_size = int64(file_size / *worker_count)
 	now := time.Now().UTC()
 	for num := int64(0); num < worker.Count; num++ {
-		// New sub progress bar (give it 0 at first for new instance and assign real size later on.)
-		bar := pb.New(0).Prefix(fmt.Sprintf("Part %d  0%% ", num))
-		bar.ShowSpeed = true
-		bar.SetMaxWidth(100)
-		bar.SetUnits(pb.U_BYTES_DEC)
-		bar.SetRefreshRate(time.Second)
-		bar.ShowPercent = true
-		worker.Progress.Bars = append(worker.Progress.Bars, bar)
-
 		if num == worker.Count {
 			end = file_size // last part
 		} else {
@@ -89,10 +72,8 @@ func main() {
 		go worker.writeRange(num, start, end-1)
 		start = end
 	}
-	worker.Progress.Pool, err = pb.StartPool(worker.Progress.Bars...)
 	handleError(err)
 	worker.SyncWG.Wait()
-	worker.Progress.Pool.Stop()
 	log.Println("Elapsed time:", time.Since(now))
 	log.Println("Done!")
 	blockForWindows()
@@ -105,11 +86,7 @@ func (w *Worker) writeRange(part_num int64, start int64, end int64) {
 		log.Fatalf("Part %d request error: %s\n", part_num, err.Error())
 	}
 	defer body.Close()
-	defer w.Bars[part_num].Finish()
 	defer w.SyncWG.Done()
-
-	// Assign total size to progress bar
-	w.Bars[part_num].Total = size
 
 	// New percentage flag
 	percent_flag := map[int64]bool{}
@@ -132,15 +109,12 @@ func (w *Worker) writeRange(part_num int64, start int64, end int64) {
 				written += int64(nw)
 			}
 
-			// Update written bytes on progress bar
-			w.Bars[int(part_num)].Set64(written)
-
 			// Update current percentage on progress bars
 			p := int64(float32(written) / float32(size) * 100)
+			log.Println(p)
 			_, flagged := percent_flag[p]
 			if !flagged {
 				percent_flag[p] = true
-				w.Bars[int(part_num)].Prefix(fmt.Sprintf("Part %d  %d%% ", part_num, p))
 			}
 		}
 		if er != nil {
